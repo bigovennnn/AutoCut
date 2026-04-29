@@ -1,0 +1,56 @@
+# Environment variables - NEVER commit this file!
+config.env
+.env
+*.env.local
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+venv/
+ENV/
+env/
+.venv/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Project specific
+uploads/
+temp_workspace/
+*.mp4
+*.wav
+*.mp3
+!uploads/.gitkeep
+!temp_workspace/.gitkeep
+
+# Logs
+*.log
+logs/

@@ -1,0 +1,21 @@
+
+# Core dependencies
+langchain>=0.1.0
+langchain-openai>=0.0.5
+langchain-core>=0.1.0
+streamlit>=1.28.0
+ffmpeg-python>=0.2.0
+opencv-python>=4.8.0
+python-dotenv>=1.0.0
+requests>=2.31.0
+
+# MoviePy 2.x for advanced video editing (optional but recommended)
+moviepy>=2.0.0
+
+# Audio analysis
+librosa>=0.10.0
+scipy>=1.11.0
+
+# 可选依赖：本地Whisper语音识别
+# openai-whisper>=20231117
+# torch>=2.0.0
