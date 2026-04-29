@@ -1,396 +1,227 @@
-﻿
-# AutoCut - 多模态内容生成智能体
+# AutoCut2 - 智能视频剪辑智能体
 
-专为社交媒体内容创作定制的端到端全链路自动化 Web 应用。
+多模态社交媒体内容生成智能体，自动识别视频高光片段，生成平台适配文案。
 
-## ✨ 功能特性
-
-- 🎬 **智能视频剪辑**：基于完整音画分析自动识别高光片段，精准裁剪
-- 📸 **关键帧提取**：无帧数限制，每秒1帧精确提取，结合内容精彩度智能筛选
-- 🎤 **语音识别**：ASR 自动转录，带时间戳的分段字幕
-- 🤖 **多模态理解**：视觉语言模型（VLM）分析画面，音画联合对齐
-- 🎯 **内容评分机制**：清晰度（30%）+ 画面精彩度 + 语音内容综合评分
-- ✍️ **文案生成**：一键生成小红书/朋友圈/抖音/B站风格文案
+**当前版本：** v2.2.0
 
 ---
 
-## 🏗️ 项目架构详解
+## 核心功能
 
-### 整体架构图
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                         用户层 (Web UI)                          │
-│                     Streamlit (app.py)                           │
-└─────────────────────────────┬───────────────────────────────────┘
-                              │
-┌─────────────────────────────▼───────────────────────────────────┐
-│                      智能体层 (AutoCutAgent)                    │
-│                   autocut_agent.py                               │
-│  ┌────────────┐  ┌────────────┐  ┌──────────────────────┐    │
-│  │ 语音识别   │→ │ 关键帧分析 │→ │ 高光选择 & 文案生成 │    │
-│  │ (ASR API)  │  │ (VLM API)  │  │ (LLM + LangChain)   │    │
-│  └────────────┘  └────────────┘  └──────────────────────┘    │
-└─────────────────────────────┬───────────────────────────────────┘
-                              │
-┌─────────────────────────────▼───────────────────────────────────┐
-│                    媒体处理层 (MediaProcessor)                    │
-│                    media_processor.py                             │
-│  ┌────────────────┐  ┌────────────────┐  ┌─────────────────┐  │
-│  │  音频提取      │  │  关键帧抽取    │  │  图片质量筛选   │  │
-│  │  (FFmpeg)      │  │  (FFmpeg)      │  │  (OpenCV)       │  │
-│  └────────────────┘  └────────────────┘  └─────────────────┘  │
-└─────────────────────────────┬───────────────────────────────────┘
-                              │
-┌─────────────────────────────▼───────────────────────────────────┐
-│                      AI 模型层 (云端 API)                         │
-│  ┌──────────┐  ┌──────────┐  ┌──────────────┐                  │
-│  │   LLM    │  │   ASR    │  │     VLM      │                  │
-│  │(DeepSeek)│  │(Paraformer│  │(Qwen-VL)     │                  │
-│  └──────────┘  └──────────┘  └──────────────┘                  │
-└───────────────────────────────────────────────────────────────────┘
-```
+| 功能 | 说明 |
+|------|------|
+| **多高光拼接** | 自动选取 3+ 个精彩片段，智能拼接 |
+| **专业转场** | CROSSFADE 交叉淡化，平滑过渡 |
+| **自动字幕** | 基于 ASR 时间戳烧录字幕 |
+| **花字特效** | 发光、弹跳、脉冲、抖动效果 |
+| **多平台文案** | 小红书、抖音、B站、朋友圈适配 |
+| **音视频后处理** | 淡入淡出、背景音乐混音 |
 
 ---
 
-## 📁 核心模块详解
+## 快速开始
 
-### 1. app.py - Web 交互层
+### 环境要求
 
-**职责**：Streamlit 前端界面，用户交互入口
+- Python 3.10+
+- FFmpeg（添加到系统 PATH）
 
-**主要功能**：
-- 视频文件上传（支持 MP4、MOV、AVI、MKV）
-- 参数配置（发布平台、文案风格）
-- 处理进度实时展示
-- 结果可视化（高光视频、关键帧、文案）
-
-**关键组件**：
-```
-- 文件上传器
-- 参数选择器（平台/风格）
-- 进度条 + 状态文本
-- 结果展示区（视频/图片/文案）
-```
-
----
-
-### 2. autocut_agent.py - 智能体核心层
-
-**职责**：业务逻辑编排，AI 能力整合
-
-**核心类**：`AutoCutAgent`
-
-#### 8 阶段处理流水线
-
-```
-阶段 1: 📥 素材提取
-   ├─ extract_audio()       → 提取音频为 16kHz WAV
-   └─ extract_keyframes()   → 无限制每秒1帧提取
-
-阶段 2: 🎤 语音识别
-   └─ transcribe_audio()    → ASR API 转录 + 时间戳
-
-阶段 3: 🔍 清晰度预筛选
-   └─ filter_best_images()  → Top 15 清晰帧（控制 API 成本）
-
-阶段 4: 🎨 候选帧分析
-   └─ analyze_frames_with_timestamps()
-      ├─ 时间对齐 → align_frame_with_transcription()
-      ├─ 音画联合 → VLM API 分析
-      └─ 生成描述 + 时间区间标注
-
-阶段 5: 🎯 内容精彩度筛选
-   └─ select_best_frames_by_content()
-      ├─ 评分维度：
-      │  ├─ 清晰度 (30%)
-      │  ├─ 画面精彩关键词
-      │  └─ 语音内容精彩度
-      └─ 输出 Top 5 精彩帧
-
-阶段 6: ✨ 高光选择（基于完整分析）
-   └─ find_highlight_with_full_analysis()
-      ├─ 输入：所有候选帧分析 + 语音转录
-      ├─ LLM 综合判断
-      └─ 输出：start/end 时间 + 选择理由
-
-阶段 7: ✂️ 视频裁剪
-   └─ trim_video()
-      ├─ FFmpeg 流复制 (c='copy')
-      └─ 无重编码，速度快，画质无损
-
-阶段 8: 📝 文案生成
-   └─ generate_copywriting()
-      ├─ 输入：画面分析 + 语音内容
-      ├─ 平台/风格定制
-      └─ 输出：可直接发布的文案
-```
-
-#### 关键算法
-
-**1. 时间对齐算法** (`align_frame_with_transcription`)
-```python
-输入：帧时间戳 + 语音片段列表
-逻辑：
-  - 精确匹配：帧在语音片段时间区间内 → 直接返回
-  - 最近邻：计算帧到各语音片段的距离 → 返回最近
-输出：最相关的语音片段
-```
-
-**2. 内容精彩度评分** (`select_best_frames_by_content`)
-```
-评分公式：
-  总分 = 清晰度分×0.3 + 画面精彩分 + 语音精彩分
-
-- 清晰度分：min(清晰度/200, 1.0)
-- 画面精彩分：检测关键词（精彩/激动/燃/震撼等）→ +0.2
-- 语音精彩分：检测关键词（太棒了/厉害/完美等）→ +0.3
-```
-
-**3. 音画联合高光选择** (`find_highlight_with_full_analysis`)
-```
-Prompt 输入：
-  ├─ 完整语音转录（带时间戳）
-  └─ 所有候选帧分析（时间+画面描述）
-
-要求：
-  ├─ 结合语音和画面综合判断
-  ├─ 时长 3-10 秒
-  └─ JSON 格式输出
-```
-
----
-
-### 3. media_processor.py - 媒体处理层
-
-**职责**：本地媒体文件处理，FFmpeg + OpenCV 封装
-
-**核心类**：`MediaProcessor`
-
-| 方法 | 功能 | 技术栈 |
-|------|------|--------|
-| `extract_audio()` | 提取音频为 16kHz 单声道 WAV | FFmpeg |
-| `extract_keyframes()` | 无限制每秒1帧抽帧 | FFmpeg |
-| `filter_best_images()` | 拉普拉斯方差筛选清晰度 | OpenCV |
-
-#### 关键技术细节
-
-**音频提取参数**：
-```
-acodec='pcm_s16le'  # PCM 16位编码（ASR 最佳格式）
-ac=1                 # 单声道
-ar='16k'             # 16kHz 采样率
-```
-
-**关键帧提取**：
-```
-fps=1                # 每秒1帧
-vframes=无限制       # 移除原 50 帧限制
-q:v=2                # JPG 高质量
-```
-
-**清晰度评估**：
-```python
-# 拉普拉斯方差算法
-gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-fm = cv2.Laplacian(gray, cv2.CV_64F).var()
-# 方差越大 → 边缘越丰富 → 图片越清晰
-```
-
----
-
-### 4. agentcore.py - LLM 基础设施
-
-**职责**：统一 LLM 接口，Prompt 模板管理
-
-**核心函数**：
-- `get_llm()` - 初始化 ChatOpenAI 客户端（兼容各类 OpenAI 格式 API）
-- `get_copywriting_prompt()` - 文案生成 Prompt 模板
-
-**LLM 配置**：
-```
-model: qwen-turbo (可配置)
-temperature: 0.8
-max_tokens: 1024
-```
-
----
-
-## 📂 完整项目结构
-
-```
-AutoCut/
-├── app.py                          # Streamlit Web 界面
-├── autocut_agent.py                # 智能体核心逻辑（8阶段流水线）
-│   ├── AutoCutAgent
-│   │   ├── transcribe_audio()      # ASR 语音识别
-│   │   ├── align_frame_with_transcription()  # 时间对齐
-│   │   ├── analyze_frames_with_timestamps() # 关键帧分析
-│   │   ├── select_best_frames_by_content()  # 内容评分筛选
-│   │   ├── find_highlight_with_full_analysis() # 高光选择
-│   │   ├── trim_video()            # 视频裁剪
-│   │   ├── generate_copywriting()   # 文案生成
-│   │   └── process_video()         # 主流程编排
-├── media_processor.py               # 媒体处理引擎
-│   └── MediaProcessor
-│       ├── extract_audio()         # 音频提取
-│       ├── extract_keyframes()     # 关键帧提取
-│       └── filter_best_images()    # 清晰度筛选
-├── agentcore.py                     # LLM 基础设施
-│   ├── get_llm()
-│   └── get_copywriting_prompt()
-├── config.env.example               # 配置文件模板
-├── requirements.txt                 # Python 依赖
-├── test_scheme3.py                  # 方案3功能测试脚本
-├── temp_workspace/                  # 临时工作目录（自动创建）
-│   ├── *.wav                        # 提取的音频
-│   └── frames/                      # 提取的关键帧
-└── uploads/                         # 上传文件目录（自动创建）
-```
-
----
-
-## 🚀 快速开始
-
-### 1. 安装依赖
+### 安装依赖
 
 ```bash
 pip install -r requirements.txt
 ```
 
-### 2. 安装 FFmpeg
+### 配置 API Key
 
-- **Windows**: 下载 FFmpeg 并添加到系统 PATH
-- **macOS**: `brew install ffmpeg`
-- **Linux**: `sudo apt-get install ffmpeg`
-
-### 3. 配置 API Key
-
-复制 `config.env.example` 为 `config.env`，填入 API Key：
-
-```env
-# LLM 配置（文案生成/高光选择）
-LLM_API_KEY=your_llm_api_key
-LLM_BASE_URL=https://api.deepseek.com/v1
-
-# ASR 配置（语音识别，可选）
-ASR_API_KEY=your_asr_api_key
-ASR_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1/audio/transcriptions
-
-# VLM 配置（画面分析，可选，默认复用 LLM）
-VLM_API_KEY=your_vlm_api_key
-VLM_BASE_URL=your_vlm_base_url
+```bash
+cp config.env.example AutoCut/config.env
+# 编辑 AutoCut/config.env，填入 API 密钥
 ```
 
-### 4. 运行应用
+### 启动服务
 
+**方式一：独立前端 + API（推荐）**
+```bash
+# 终端1：启动后端
+python api_server.py
+
+# 终端2：启动前端
+cd frontend && python -m http.server 3000
+```
+
+访问：http://localhost:3000
+
+**方式二：Streamlit 一体化界面**
 ```bash
 streamlit run app.py
 ```
 
-然后在浏览器中打开显示的地址（通常是 http://localhost:8501）
-
 ---
 
-## 📊 数据流图
+## 项目架构
+
+### 4 层设计
 
 ```
-输入视频
-   │
-   ├─→ [MediaProcessor.extract_audio] → 音频文件
-   │                                  ↓
-   │                          [ASR API] → 转录文本 + 时间戳
-   │
-   └─→ [MediaProcessor.extract_keyframes] → 所有关键帧（无限制）
-                                          ↓
-                                  [MediaProcessor.filter_best_images]
-                                          ↓
-                                  Top 15 清晰帧（预筛选）
-                                          ↓
-                          [AutoCutAgent.analyze_frames_with_timestamps]
-                                          ↓
-                    音画联合分析 → 候选帧（带描述+时间）
-                                          ↓
-                          [AutoCutAgent.select_best_frames_by_content]
-                                          ↓
-                          Top 5 精彩帧（基于内容评分）
-                                          ↓
-        ┌─────────────────────────────────┼─────────────────────────────────┐
-        ↓                                 ↓                                 ↓
-[VLM 整体画面分析]          [LLM 高光选择（完整分析）]          [LLM 文案生成]
-        ↓                                 ↓                                 ↓
-   画面描述                        高光时间区间                        平台定制文案
-        ↓                                 ↓                                 ↓
-        └─────────────────────────────────┼─────────────────────────────────┘
-                                          ↓
-                              最终输出结果
-                              ├─ 高光视频
-                              ├─ 5 张精彩关键帧（带时间+描述+评分）
-                              └─ 可直接发布的文案
+┌─────────────────────────────────────┐
+│  用户层：Streamlit / HTML 前端        │
+└─────────────────┬───────────────────┘
+                  │
+┌─────────────────▼───────────────────┐
+│  智能体层：AutoCutAgent                │
+│  8阶段流水线编排                       │
+└─────────────────┬───────────────────┘
+                  │
+┌─────────────────▼───────────────────┐
+│  媒体层：FFmpeg + OpenCV + MoviePy    │
+└─────────────────┬───────────────────┘
+                  │
+┌─────────────────▼───────────────────┐
+│  AI 层：LLM + ASR + VLM              │
+└───────────────────────────────────────┘
+```
+
+### 8 阶段处理流水线
+
+```
+阶段1: 素材提取 → 音频(16kHz WAV) + 关键帧(1fps)
+阶段2: 语音识别 → ASR 转文字，带时间戳
+阶段3: 清晰度过滤 → Laplacian 方差滤波，Top 15
+阶段4: 画面分析 → VLM 分析关键帧内容
+阶段5: 内容评分 → 多维度评分，Top 5
+阶段6: 高光选择 → LLM 分析，输出 3+ 片段
+阶段7: 视频剪辑 → FFmpeg + MoviePy 转场拼接
+阶段8: 文案生成 → 平台适配文案
 ```
 
 ---
 
-## 🔧 技术栈
+## 目录结构
 
-| 层级 | 技术 | 说明 |
+```
+AutoCut2/
+├── app.py                  # Streamlit Web 界面（可选）
+├── api_server.py           # FastAPI 后端服务器
+├── frontend/
+│   └── index.html          # 独立前端界面
+├── autocut_agent.py        # 核心智能体
+├── media_processor.py      # FFmpeg/OpenCV 封装
+├── video_trimmer.py        # FFmpeg 视频剪辑
+├── video_assembler.py       # MoviePy 专业拼接
+├── subtitle_generator.py    # 自动字幕生成
+├── flower_text_effects.py  # 花字特效
+├── audio_processor.py      # 音频后处理
+├── moviepy_processor.py    # MoviePy 2.x 封装
+├── agentcore.py            # LLM 基础设施
+├── asr_processor.py        # 语音识别
+├── highlight_scorer.py     # 多维度评分
+├── minimax_client.py       # MiniMax LLM 适配器
+├── prompt_manager.py       # 提示词管理
+├── version.py              # 版本管理
+├── CHANGELOG.md           # 开发日志
+├── CLAUDE.md              # 开发者指南
+├── DEPLOYMENT_GUIDE.md    # 本地部署指南
+├── README_FOR_TEAM.md     # 团队共享文档
+├── requirements.txt       # Python 依赖
+└── config.env.example     # 配置模板
+```
+
+---
+
+## 核心模块
+
+### 视频拼接 (video_assembler.py)
+
+| 功能 | 说明 |
+|------|------|
+| 多片段拼接 | 支持 3+ 高光片段 |
+| 转场效果 | CROSSFADE / WIPE / SLIDE |
+| 淡入淡出 | 可配置时长 |
+| 字幕烧录 | TextClip 渲染 |
+
+### 花字特效 (flower_text_effects.py)
+
+| 效果 | 说明 |
+|------|------|
+| `create_glow()` | 多层霓虹发光 |
+| `create_bounce()` | 正弦弹跳动画 |
+| `create_pulse()` | 节律缩放动画 |
+| `create_shake()` | 水平抖动 |
+
+### 高光评分 (highlight_scorer.py)
+
+| 维度 | 权重 |
+|------|------|
+| 清晰度 | 20% |
+| 视觉关键词 | 15% |
+| 语音能量 | 30% |
+| LLM 语义 | 20% |
+| 场景转换接近度 | 15% |
+
+---
+
+## AI 模型配置
+
+| 模型 | 用途 | 默认方案 |
+|------|------|----------|
+| **LLM** | 文案生成 + 高光选择 | DeepSeek / DashScope Qwen |
+| **ASR** | 语音识别 | DashScope Paraformer-v2 |
+| **VLM** | 画面分析 | DashScope Qwen-VL |
+
+### 本地化方案
+
+| 云端 | 本地替代 |
+|------|----------|
+| LLM → DeepSeek/Qwen | Ollama + DeepSeek-R1 |
+| ASR → DashScope | Whisper |
+| VLM → Qwen-VL | LLaVA |
+
+详见 [DEPLOYMENT_GUIDE.md](DEPLOYMENT_GUIDE.md)
+
+---
+
+## 技术栈
+
+| 层级 | 技术 |
+|------|------|
+| 前端 | Streamlit + HTML/CSS/JS |
+| 后端 | FastAPI |
+| 媒体处理 | FFmpeg + OpenCV + MoviePy 2.x |
+| LLM 编排 | LangChain (PromptTemplate + JSON Parser) |
+| AI 模型 | DeepSeek / DashScope / MiniMax |
+
+---
+
+## 版本历史
+
+| 版本 | 日期 | 说明 |
 |------|------|------|
-| **前端** | Streamlit | 本地 Web UI，快速原型 |
-| **编排** | LangChain | LLM 应用框架，LCEL 语法 |
-| **媒体处理** | FFmpeg | 音视频处理，流复制裁剪 |
-| **图像处理** | OpenCV | 拉普拉斯方差清晰度评估 |
-| **LLM** | ChatOpenAI 兼容 | 支持 DeepSeek/Qwen/豆包等 |
-| **ASR** | Paraformer-v2 | 阿里云语音识别（可选） |
-| **VLM** | Qwen-VL / GPT-4V | 视觉语言模型（可选） |
+| v2.2.0 | 2026-04-21 | 多高光拼接、VideoAssembler、转场、字幕、花字 |
+| v2.0.0 | 2026-04-20 | 前后端分离架构 |
+| v1.2.0 | 2026-04-19 | highlight_scorer 多维评分 |
+| v1.1.0 | 2026-04-18 | MiniMax LLM + VLM |
+| v1.0.0 | 2026-04-17 | 初始版本，Streamlit 一体化 |
+
+详见 [CHANGELOG.md](CHANGELOG.md)
 
 ---
 
-## ⚙️ 配置说明
+## 团队分工
 
-### 环境变量
+| 模块 | 优先级 |
+|------|--------|
+| 核心流水线 | P0 |
+| 视频拼接 | P0 |
+| 前端界面 | P1 |
+| ASR 本地化 | P1 |
+| LLM 本地化 | P2 |
+| 效果增强 | P2 |
 
-| 变量 | 必填 | 说明 |
-|------|------|------|
-| `LLM_API_KEY` | 是 | 大语言模型 API Key |
-| `LLM_BASE_URL` | 是 | API 基础 URL |
-| `ASR_API_KEY` | 否 | 语音识别 API Key（无则用模拟数据） |
-| `ASR_BASE_URL` | 否 | ASR API URL |
-| `VLM_API_KEY` | 否 | 视觉模型 API Key（默认复用 LLM） |
-| `VLM_BASE_URL` | 否 | VLM API URL |
-
----
-
-## 📝 使用说明
-
-1. 上传视频文件（支持 MP4、MOV、AVI、MKV 格式）
-2. 选择目标发布平台（小红书/朋友圈/抖音/B站）
-3. 选择文案风格（温馨治愈/活泼俏皮/专业严谨等）
-4. 点击「一键生成」
-5. 查看生成的高光视频、关键帧（带时间标注+精彩度评分）和文案
-6. 复制文案，直接发布！
+详见 [README_FOR_TEAM.md](README_FOR_TEAM.md)
 
 ---
 
-## ⚠️ 注意事项
+## License
 
-- 视频处理在本地完成，不会上传到云端（仅 API 调用上传文本/编码图片）
-- 首次运行需要配置 API Key
-- 建议使用较短的视频进行测试（长视频会增加 API 成本）
-- 关键帧提取无帧数限制，但预筛选为 Top 15 以控制 API 调用量
-
----
-
-## 🧪 测试
-
-运行方案3功能测试：
-
-```bash
-python test_scheme3.py
-```
-
----
-
-## 📄 许可证
-
-本项目仅供学习和研究使用。
-
+MIT License
