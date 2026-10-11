@@ -1,3 +1,4 @@
+# Modified by the AutoCut project, 2026-10-12: lightweight operation and export correctness.
 from typing import Any, Dict
 from pathlib import Path
 
@@ -27,7 +28,7 @@ class ScriptTemplateRecomendation(BaseNode):
     def __init__(self, server_cfg):
         super().__init__(server_cfg)
         self.element_filter = ElementFilter(json_path=str(self.server_cfg.script_template.script_template_info_path))
-        self.vectorstore = StorylineRecall.build_vectorstore(self.element_filter.library)
+        self.vectorstore = StorylineRecall.build_vectorstore(self.element_filter.library, backend=self.server_cfg.script_template.retrieval_backend)
         self._top_n = 3
 
     async def default_process(self, node_state: NodeState, inputs: Dict[str, Any]):

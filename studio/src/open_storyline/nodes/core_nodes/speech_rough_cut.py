@@ -1,3 +1,4 @@
+# Modified by the AutoCut project, 2026-10-12: lightweight operation and export correctness.
 from typing import Any, Dict
 from pathlib import Path
 import json
@@ -84,6 +85,7 @@ class SpeechRoughCutNode(BaseNode):
                 )
 
                 # Call LLM for rough cut JSON
+                raw = None
                 try:
                     raw = await llm.complete(
                         system_prompt=system_prompt,
@@ -98,8 +100,7 @@ class SpeechRoughCutNode(BaseNode):
                     print(parsed_json)
                     rough_cut_json += parsed_json.get('res', [])
                 except Exception as e:
-                    # fallback to original ASR if LLM fails
-                    node_state.node_summary.add_warning(f"LLM rough cut failed: {e}, raw response: {raw}")
+                    raise RuntimeError(f'LLM rough cut failed at sentence {i}; task stopped') from e
                 
 
             # Group sentences based on gap threshold

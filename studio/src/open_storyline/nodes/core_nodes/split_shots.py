@@ -1,3 +1,4 @@
+# Modified by the AutoCut project, 2026-10-12: lightweight operation and export correctness.
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -9,6 +10,7 @@ import os
 import shutil
 import subprocess
 import math
+import re
 
 
 import numpy as np
@@ -253,12 +255,15 @@ class SplitShotsNode(BaseNode):
 
     def __init__(self, *args) -> None:
         super().__init__(*args)
+        self.ffmpeg_executable = resolve_ffmpeg_executable()
 
-        self.transnetv2_model = load_transnetv2_model_cached(
+    @property
+    def transnetv2_model(self) -> Any:
+        """Load neural shot detection only when that backend is executed."""
+        return load_transnetv2_model_cached(
             str(self.server_cfg.split_shots.transnet_weights),
             device=self.server_cfg.split_shots.transnet_device,
         )
-        self.ffmpeg_executable = resolve_ffmpeg_executable()
 
     # -------------------------
     # Public entrypoints
@@ -522,14 +527,22 @@ class SplitShotsNode(BaseNode):
             return [clip], starting_clip_index + 1
 
         # 1) Detect scenes
-        scenes = detect_scenes_with_transnetv2_without_proxy(
-            self.transnetv2_model,
-            input_video_path,
-            self.ffmpeg_executable,
-            frames_per_second=DEFAULT_SCENE_DETECTION_FRAMES_PER_SECOND,
-            threshold=DEFAULT_SCENE_DETECTION_THRESHOLD,
-        )
-        split_points_seconds = convert_scenes_to_split_points_seconds(scenes)
+        if self.server_cfg.split_shots.backend == "ffmpeg":
+            command = [self.ffmpeg_executable, "-hide_banner", "-i", str(input_video_path),
+                       "-an", "-vf", "fps=5,scale=160:-2,select=gt(scene\\,0.3),showinfo",
+                       "-f", "null", "-"]
+            result = subprocess.run(command, capture_output=True, text=True, timeout=180)
+            if result.returncode:
+                raise RuntimeError(f"FFmpeg shot detection failed: {result.stderr[-1000:]}")
+            split_points_seconds = [float(value) for value in re.findall(r"pts_time:([0-9.]+)", result.stderr)]
+            node_summary.info_for_user("Shot detection backend: FFmpeg (no local model)")
+        else:
+            scenes = detect_scenes_with_transnetv2_without_proxy(
+                self.transnetv2_model, input_video_path, self.ffmpeg_executable,
+                frames_per_second=DEFAULT_SCENE_DETECTION_FRAMES_PER_SECOND,
+                threshold=DEFAULT_SCENE_DETECTION_THRESHOLD,
+            )
+            split_points_seconds = convert_scenes_to_split_points_seconds(scenes)
 
         split_points_seconds = enforce_shot_duration_constraints_on_split_points_seconds(
             split_points_seconds,

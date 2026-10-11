@@ -1,0 +1,21 @@
+AutoCut Studio incorporates FireRed-OpenStoryline source.
+Upstream: https://github.com/FireRedTeam/FireRed-OpenStoryline
+Pinned revision: c9e945215586f45c12a61c1951ee9a8e9c43a027
+Upstream license: Apache License 2.0 (see LICENSE).
+
+AutoCut changes, published 2026-10-12:
+- Add a lightweight direct-export UI, bounded cloud planning, automatic review,
+  local speech subtitle integration, editable exports and fancy title styles.
+- Modify the following upstream files for lightweight operation and correctness:
+  src/open_storyline/agent.py
+  src/open_storyline/config.py
+  src/open_storyline/nodes/core_nodes/render_video.py
+  src/open_storyline/nodes/core_nodes/script_template_rec.py
+  src/open_storyline/nodes/core_nodes/select_bgm.py
+  src/open_storyline/nodes/core_nodes/speech_rough_cut.py
+  src/open_storyline/nodes/core_nodes/split_shots.py
+  src/open_storyline/utils/recall.py
+
+The complete upstream Agent is preserved separately from the new fixed workflow.
+Font and Whisper assets are installed separately with their original licenses;
+no model weights, user footage, provider credentials or private run data ship here.

@@ -1,3 +1,4 @@
+# Modified by the AutoCut project, 2026-10-12: lightweight operation and export correctness.
 from typing import Any, Dict
 from pathlib import Path
 
@@ -31,7 +32,7 @@ class SelectBGMNode(BaseNode):
     def __init__(self, server_cfg):
         super().__init__(server_cfg)
         self.element_filter = ElementFilter(json_path=f"{self.server_cfg.project.bgm_dir}/meta.json")
-        self.vectorstore = StorylineRecall.build_vectorstore(self.element_filter.library)
+        self.vectorstore = StorylineRecall.build_vectorstore(self.element_filter.library, backend=self.server_cfg.select_bgm.retrieval_backend)
 
     async def default_process(
         self,

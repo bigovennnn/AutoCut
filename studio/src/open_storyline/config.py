@@ -1,3 +1,4 @@
+# Modified by the AutoCut project, 2026-10-12: lightweight operation and export correctness.
 # /src/open_storyline/config.py
 from __future__ import annotations
 import os
@@ -137,6 +138,7 @@ class PexelsConfig(ConfigBaseModel):
 class SplitShotsConfig(ConfigBaseModel):
     transnet_weights: Path = Field(..., description="Path to transnet_v2 weights")
     transnet_device: str = "cpu"
+    backend: Literal["transnet", "ffmpeg"] = "transnet"
 
 class UnderstandClipsConfig(ConfigBaseModel):
     sample_fps: float = 2.0
@@ -152,6 +154,7 @@ class GroupClipsConfig(ConfigBaseModel):
 class RecommendScriptTemplateConfig(ConfigBaseModel):
     script_template_dir: Path = Field(..., description="Script template directory.")
     script_template_info_path: Path = Field(..., description="Script template meta info path.")
+    retrieval_backend: Literal["embedding", "lexical"] = "embedding"
 
 class GenerateVoiceoverConfig(ConfigBaseModel):
     tts_provider_params_path: Path = Field(..., description="TTS provider config file path")
@@ -164,6 +167,10 @@ class SelectBGMConfig(ConfigBaseModel):
     sample_rate: int = 22050
     hop_length: int = 2048
     frame_length: int = 2048
+    retrieval_backend: Literal["embedding", "lexical"] = "embedding"
+
+class RuntimeConfig(ConfigBaseModel):
+    profile: Literal["standard", "lightweight"] = "standard"
 
 class RecommendTextConfig(ConfigBaseModel):
     font_info_path: Path = Field(..., description="Font info path.")
@@ -239,6 +246,7 @@ class PlanTimelineProConfig(ConfigBaseModel):
     # Whether text start time should align with detected music beats
 
 class Settings(ConfigBaseModel):
+    runtime: RuntimeConfig = Field(default_factory=RuntimeConfig)
     developer: DeveloperConfig
     project: ProjectConfig
 

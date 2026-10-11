@@ -1,3 +1,4 @@
+# Modified by the AutoCut project, 2026-10-12: lightweight operation and export correctness.
 import os
 import tempfile
 import time
@@ -6,6 +7,8 @@ import asyncio
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 import json
+import shutil
+import subprocess
 
 import numpy as np
 from open_storyline.utils.logging import MCPMoviePyLogger
@@ -44,7 +47,6 @@ from src.open_storyline.config import Settings
 from open_storyline.nodes.core_nodes.base_node import BaseNode, NodeMeta
 from open_storyline.nodes.node_state import NodeState
 from open_storyline.nodes.node_schema import RenderVideoInput
-from open_storyline.utils.util import get_video_rotation
 
 # =============================================================================
 # Constants
@@ -300,14 +302,17 @@ class MediaCache:
         max_h = min(canvas_h, MAX_MEDIA_DIMENSION_PX)
 
         if src_w > 0 and src_h > 0:
-            scale = min(max_w / float(src_w), max_h / float(src_h))
+            scale_fn = max if self._clip_compose_mode == 'crop' else min
+            scale = scale_fn(max_w / float(src_w), max_h / float(src_h))
 
             target_w = make_even(int(src_w * scale))
             target_h = make_even(int(src_h * scale))
             src_ratio = src_w / float(src_h)
             canvas_ratio = canvas_w / float(canvas_h)
         
-        clip = VideoFileClip(path, audio=self._include_video_audio, target_resolution=(src_w, src_h))
+        # MoviePy 2.2.1 expects (width, height). Decode at the working size to avoid
+        # holding full-resolution frames on memory-constrained machines.
+        clip = VideoFileClip(path, audio=self._include_video_audio, target_resolution=(target_w, target_h))
 
         # maybe crop
         if self._clip_compose_mode == 'crop':
@@ -315,10 +320,8 @@ class MediaCache:
             clip = clip.cropped(x0, y0, x1, y1)
         
         # resize to canvas
-        if src_ratio >= canvas_ratio:
-            clip = clip.resized(width=target_w)
-        else:
-            clip = clip.resized(height=target_h)
+        if self._clip_compose_mode == 'crop':
+            clip = clip.resized(new_size=(canvas_w, canvas_h))
 
         self._video_sources[path] = clip
         return clip
@@ -376,15 +379,24 @@ class MediaCache:
         if cached is not None:
             return cached
 
-        w = h = 0
-        # simplest: open once (metadata fetch), then close
-        try:
-            tmp = VideoFileClip(path, audio=False)
-            w = int(getattr(tmp, "w", 0) or 0)
-            h = int(getattr(tmp, "h", 0) or 0)
-            close_quietly(tmp)
-        except Exception:
-            w, h = 0, 0
+        # ffmpeg 8 stderr metadata is not fully understood by MoviePy's parser.
+        # Probe structured rotation data before sizing the autorotated decode.
+        result = subprocess.run([
+            'ffprobe', '-v', 'error', '-select_streams', 'v:0',
+            '-show_entries', 'stream=width,height:stream_tags=rotate:stream_side_data=rotation',
+            '-of', 'json', path,
+        ], capture_output=True, text=True, timeout=30, check=True)
+        streams = json.loads(result.stdout).get('streams', [])
+        if not streams:
+            raise ValueError('Source has no video stream')
+        stream = streams[0]
+        w, h = int(stream['width']), int(stream['height'])
+        rotation = float(next((item['rotation'] for item in stream.get('side_data_list', [])
+                               if 'rotation' in item), stream.get('tags', {}).get('rotate', 0)))
+        if int(round(rotation)) % 180 == 90:
+            w, h = h, w
+        if w <= 0 or h <= 0:
+            raise ValueError('Source video size is invalid')
 
         self._video_size_cache[path] = (w, h)
         return w, h
@@ -431,8 +443,8 @@ class PillowSubtitleRenderer:
         font_color: Tuple[int, int, int, int],
         **kwargs,
     ) -> List[ImageClip]:
-        if not self._font_path:
-            return []
+        if subtitle_items and (not self._font_path or not os.path.isfile(self._font_path)):
+            raise FileNotFoundError('Subtitle track requires an available font file')
         canvas_w, canvas_h = video_size
         scale = (canvas_h / SUBTITLE_BASE_HEIGHT_PX) if canvas_h > 0 else 1.0
 
@@ -458,18 +470,27 @@ class PillowSubtitleRenderer:
             if not text or dur <= 0:
                 continue
 
+            if item.get('kind') == 'title' and item.get('title_style', 'plain') != 'plain':
+                from open_storyline.utils.fancy_titles import make_title_clip
+                clips.append(make_title_clip(text, item['title_style'], start_s, dur, video_size))
+                continue
+
             clip = self._make_clip(
                 text=text,
                 start_s=start_s,
                 end_s=end_s,
                 video_size=video_size,
-                font_size=font_size,
-                font_color=font_color,
+                font_size=min(font_size, 28) if item.get('kind') == 'speech' else font_size,
+                font_color=(255, 255, 255, 255) if item.get('kind') == 'speech' else font_color,
                 margin_bottom=margin_bottom,
                 stroke_width=stroke_width,
                 stroke_color=stroke_color,
             )
             if clip is not None:
+                if item.get('kind') == 'title':
+                    clip = clip.with_position(('center', max(20, int(canvas_h * 0.07))))
+                elif item.get('kind') == 'speech':
+                    clip = clip.with_position(('center', max(0, canvas_h - int(canvas_h * 0.10) - clip.h)))
                 clips.append(clip)
 
         return clips
@@ -530,12 +551,9 @@ class PillowSubtitleRenderer:
         return subtitle_clip
 
     def _load_font(self, font_size: int) -> ImageFont.FreeTypeFont:
-        try:
-            if self._font_path and os.path.exists(self._font_path):
-                return ImageFont.truetype(font=self._font_path, size=font_size)
-        except Exception:
-            pass
-        return ImageFont.load_default()
+        if not self._font_path or not os.path.isfile(self._font_path):
+            raise FileNotFoundError('Configured subtitle font is unavailable')
+        return ImageFont.truetype(font=self._font_path, size=font_size)
 
     @staticmethod
     def _wrap_text_by_width(text: str, font: ImageFont.FreeTypeFont, max_width_px: int) -> str:
@@ -588,7 +606,9 @@ class AudioTrackComposer:
 
         # video original audio
         if video_audio_clip is not None:
-            video_volume_scale = kwargs.get('video_volume_scale') or VIDEO_VOLUME_SCALE
+            video_volume_scale = kwargs.get('video_volume_scale')
+            if video_volume_scale is None:
+                video_volume_scale = VIDEO_VOLUME_SCALE
             video_layer = video_audio_clip.with_start(0).with_volume_scaled(video_volume_scale)
 
             if video_layer.duration is not None:
@@ -632,7 +652,8 @@ class AudioTrackComposer:
                 continue
 
             clip = src.subclipped(src_start, sub_end).with_start(tl_start)
-            clip = clip.with_volume_scaled(kwargs.get('tts_volume_scale') or TTS_VOLUME_SCALE)
+            gain = kwargs.get('tts_volume_scale')
+            clip = clip.with_volume_scaled(TTS_VOLUME_SCALE if gain is None else gain)
             layers.append(clip)
 
         # bgm (concat then loop/trim)
@@ -654,7 +675,8 @@ class AudioTrackComposer:
                 segments.append(src.subclipped(src_start, src_end))
 
             if segments:
-                bgm = concatenate_audioclips(segments).with_volume_scaled(kwargs.get('bgm_volume_scale') or BGM_VOLUME_SCALE)
+                gain = kwargs.get('bgm_volume_scale')
+                bgm = concatenate_audioclips(segments).with_volume_scaled(BGM_VOLUME_SCALE if gain is None else gain)
                 if bgm.duration is not None:
                     if bgm.duration < final_duration_s - AUDIO_DURATION_TOLERANCE_SECONDS:
                         bgm = self._loop_audio(bgm, final_duration_s)
@@ -801,7 +823,9 @@ class RenderVideoPipeline:
 
             logger = MCPMoviePyLogger(report)
             
-            FFMPEG_PARAMS[3] = f"{crf}" # set crf (video quality setting), default is 23 (medium quality)
+            ffmpeg_params = FFMPEG_PARAMS.copy()
+            ffmpeg_params[3] = str(crf)
+            ffmpeg_params[-1] = '2'  # bounded CPU use on the lightweight host
 
             await asyncio.to_thread(
                 final_clip.write_videofile,
@@ -811,10 +835,11 @@ class RenderVideoPipeline:
                 temp_audiofile=os.path.join(temp_dir, TEMP_AUDIO_FILENAME),
                 remove_temp=True,
                 fps=output_fps,
-                ffmpeg_params=FFMPEG_PARAMS,
+                ffmpeg_params=ffmpeg_params,
                 logger=logger,
             )
 
+            validation = await asyncio.to_thread(validate_rendered_media, Path(output_path), final_duration_s)
             node_state.node_summary.info_for_user(
                 f"Video generated successfully, duration: {final_duration_s} seconds, path: {output_path}",
                 preview_urls=[output_path],
@@ -824,7 +849,9 @@ class RenderVideoPipeline:
             return {
                 "output_path": output_path,
                 "output_basename": output_name,
-                "duration_s": float(final_duration_s),
+                "duration_s": validation['duration_s'],
+                "planned_duration_s": float(final_duration_s),
+                "validation": validation,
                 "output_size": {"width": int(output_canvas_size[0]), "height": int(output_canvas_size[1])},
             }
 
@@ -836,6 +863,7 @@ class RenderVideoPipeline:
             close_quietly(base_clip)
             close_quietly(final_clip)
             cache.close()
+            shutil.rmtree(temp_dir, ignore_errors=True)
 
     @staticmethod
     def _final_duration_seconds(video_items: List[Dict[str, Any]]) -> float:
@@ -870,7 +898,9 @@ class RenderVideoPipeline:
             end_s = milliseconds_to_seconds(timeline_window.get("end", 0.0))
             expected_dur = max(0.0, end_s - start_s)
             if expected_dur <= 0:
-                continue
+                raise ValueError('Video timeline contains a non-positive duration')
+            if start_s < current_time - 0.001:
+                raise ValueError('Concatenation timeline contains overlapping video segments')
 
             # fill gap
             if start_s > current_time:
@@ -886,7 +916,7 @@ class RenderVideoPipeline:
             )
 
             if seg_clip is None:
-                clips.append(black_clip(expected_dur))
+                raise ValueError('Video segment has no valid source; refusing to substitute black frames')
             else:
                 clips.append(seg_clip)
                 clips_to_close.append(seg_clip)
@@ -998,6 +1028,35 @@ class RenderVideoPipeline:
 # =============================================================================
 # Node entrypoint
 # =============================================================================
+
+def validate_rendered_media(path: Path, expected_duration: float) -> Dict[str, Any]:
+    """Probe and fully decode output before reporting a successful render."""
+    if not path.is_file() or path.stat().st_size <= 0:
+        raise RuntimeError('Rendered output is missing or empty')
+    probe = subprocess.run(
+        ['ffprobe', '-v', 'error', '-show_format', '-show_streams', '-of', 'json', str(path)],
+        check=True, capture_output=True, text=True, timeout=30,
+    )
+    metadata = json.loads(probe.stdout)
+    videos = [s for s in metadata.get('streams', []) if s.get('codec_type') == 'video']
+    if not videos:
+        raise RuntimeError('Rendered output has no video stream')
+    duration = float(metadata['format']['duration'])
+    fps = videos[0].get('avg_frame_rate', '25/1').split('/')
+    frame_seconds = float(fps[1]) / float(fps[0]) if float(fps[0]) else 0.04
+    if abs(duration - expected_duration) > max(0.15, 2 * frame_seconds):
+        raise RuntimeError(f'Render duration mismatch: expected {expected_duration}, actual {duration}')
+    decoded = subprocess.run(
+        ['ffmpeg', '-v', 'error', '-xerror', '-i', str(path), '-f', 'null', '-'],
+        capture_output=True, timeout=max(60, expected_duration * 10),
+    )
+    if decoded.returncode:
+        raise RuntimeError('Rendered output failed full media decoding')
+    return {
+        'duration_s': duration, 'size_bytes': path.stat().st_size, 'decoded': True,
+        'width': videos[0]['width'], 'height': videos[0]['height'],
+        'has_audio': any(s.get('codec_type') == 'audio' for s in metadata.get('streams', [])),
+    }
 
 @NODE_REGISTRY.register()
 class RenderVideoNode(BaseNode):

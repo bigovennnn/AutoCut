@@ -1,3 +1,4 @@
+# Modified by the AutoCut project, 2026-10-12: lightweight operation and export correctness.
 from dataclasses import dataclass, field
 from datetime import timedelta
 from typing import Optional, Any
@@ -208,7 +209,12 @@ async def build_agent(
         max_retries=vlm_max_retries,
     )
 
-    sampling_callback = make_sampling_callback(llm, vlm)
+    sampling_options = {}
+    if cfg.runtime.profile == "lightweight":
+        sampling_options = {"max_frames": cfg.understand_clips.max_frames,
+                            "frames_per_sec": cfg.understand_clips.sample_fps,
+                            "resize_edge": 480}
+    sampling_callback = make_sampling_callback(llm, vlm, **sampling_options)
 
     connections = {
         cfg.local_mcp_server.server_name: {

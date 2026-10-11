@@ -1,3 +1,4 @@
+# Modified by the AutoCut project, 2026-10-12: exclude local assets and secrets.
 # === Python 生成文件 ===
 __pycache__/
 *.py[cod]
@@ -73,3 +74,16 @@ data/**
 !data/prompts/
 !data/prompts/**
 resource/**
+.env.cloud
+config.local.toml
+runtime-local/
+
+# Private inputs, credentials and generated artifacts
+uploads/
+.env
+.env.*
+!.env.cloud.example
+config.env
+*.key
+*.pem
+.claude/settings.local.json
