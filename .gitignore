@@ -54,3 +54,13 @@ temp_workspace/
 # Logs
 *.log
 logs/
+
+# Current lightweight exporter and local-only work
+.env.cloud
+runtime-local/
+resource/
+.claude/settings.local.json
+.pytest_cache/
+*.key
+*.pem
+docs/reboot/
